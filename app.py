@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 
 gemini_api_key = os.environ.get('GOOGLE_API_KEY')
@@ -73,6 +74,7 @@ graph = graph_builder.compile()
 
 
 app = Flask(__name__)
+CORS(app)
 
 @app.route('/', methods=['GET', 'POST'])
 def message_me():
