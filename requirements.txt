@@ -1,0 +1,8 @@
+flask
+langchain
+langchain-text-splitters
+langchain-community
+langgraph
+"langchain[google-genai]"
+langchain-google-genai
+langchain-pinecone

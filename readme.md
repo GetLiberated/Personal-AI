@@ -1,0 +1,1 @@
+Backend for my personal AI utilizing Retrieval-Augmented Generation (RAG)
