@@ -6,14 +6,34 @@ gemini_api_key = os.environ.get('GOOGLE_API_KEY')
 pinecone_api_key = os.environ.get('PINECONE_API_KEY')
 pinecone_index = os.environ.get('PINECONE_INDEX')
 
+import hashlib
+from gptcache import Cache
+from gptcache.adapter.api import init_similar_cache
+from langchain_community.cache import GPTCache
+from langchain.globals import set_llm_cache
+
 from langchain.chat_models import init_chat_model
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone
+
 from langchain_core.documents import Document
 from langgraph.graph import START, StateGraph
 from typing_extensions import List, TypedDict
 from langchain_core.prompts import PromptTemplate
+
+
+def get_hashed_name(name):
+    return hashlib.sha256(name.encode()).hexdigest()
+
+
+def init_gptcache(cache_obj: Cache, llm: str):
+    hashed_llm = get_hashed_name(llm)
+    init_similar_cache(cache_obj=cache_obj, data_dir=f"similar_cache_{hashed_llm}")
+
+
+set_llm_cache(GPTCache(init_gptcache))
+
 
 llm = init_chat_model(
     "gemini-2.5-flash",
@@ -21,10 +41,12 @@ llm = init_chat_model(
     google_api_key=gemini_api_key
 )
 
+
 embeddings = GoogleGenerativeAIEmbeddings(
     model="models/gemini-embedding-001",
     google_api_key=gemini_api_key
 )
+
 
 pc = Pinecone(api_key=pinecone_api_key)
 index = pc.Index(pinecone_index)
@@ -33,7 +55,7 @@ vector_store = PineconeVectorStore(embedding=embeddings, index=index)
 
 
 template = """Use the following pieces of context to answer the question at the end.
-If you don't know the answer, just say exactly "Sorry, I'm not sure how to answer that.".
+If you don't know the answer, just say exactly "Sorry, I'm not sure how to respond that.".
 Impersonate as a human named Eris and respond naturally.
 Eris doesn't talk much, so don't yap a lot or repeat yourself. Only answer what is asked.
 If you are asked about your opinion, answer based on the context provided and your knowledge of Eris.

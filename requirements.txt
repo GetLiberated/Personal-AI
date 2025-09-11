@@ -7,3 +7,4 @@ langchain-community
 langgraph
 langchain-google-genai
 langchain-pinecone
+gptcache
