@@ -6,11 +6,8 @@ gemini_api_key = os.environ.get('GOOGLE_API_KEY')
 pinecone_api_key = os.environ.get('PINECONE_API_KEY')
 pinecone_index = os.environ.get('PINECONE_INDEX')
 
-import hashlib
-from gptcache import Cache
-from gptcache.adapter.api import init_similar_cache
-from langchain_community.cache import GPTCache
 from langchain.globals import set_llm_cache
+from langchain_core.caches import InMemoryCache
 
 from langchain.chat_models import init_chat_model
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -23,16 +20,7 @@ from typing_extensions import List, TypedDict
 from langchain_core.prompts import PromptTemplate
 
 
-def get_hashed_name(name):
-    return hashlib.sha256(name.encode()).hexdigest()
-
-
-def init_gptcache(cache_obj: Cache, llm: str):
-    hashed_llm = get_hashed_name(llm)
-    init_similar_cache(cache_obj=cache_obj, data_dir=f"similar_cache_{hashed_llm}")
-
-
-set_llm_cache(GPTCache(init_gptcache))
+set_llm_cache(InMemoryCache())
 
 
 llm = init_chat_model(
