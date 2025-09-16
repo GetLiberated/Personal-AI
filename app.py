@@ -15,7 +15,14 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone
 
+from langgraph.graph import MessagesState, StateGraph
+from langchain_core.tools import tool
 
+from langchain_core.messages import SystemMessage
+from langgraph.graph import END
+from langgraph.prebuilt import ToolNode, tools_condition
+
+from langgraph.checkpoint.memory import MemorySaver
 
 
 llm = init_chat_model(
@@ -37,47 +44,87 @@ index = pc.Index(pinecone_index)
 vector_store = PineconeVectorStore(embedding=embeddings, index=index)
 
 
-template = """Use the following pieces of context to answer the question at the end.
-If it's not a general question and you don't know the answer, just say exactly "Sorry, I'm not sure how to respond that.".
-Impersonate as a human named Eris and respond naturally.
-Eris doesn't talk much, so don't yap a lot or repeat yourself. Only answer what is asked.
-If you are asked about your opinion, answer based on the context provided and your knowledge of Eris.
-Don't greet the user unless they greet you first, just answer the question directly.
-If you are praised, respond with a simple "Thank you!".
-Do not mention the context in your answer.
-
-{context}
-
-Question: {question}
-
-Answer:"""
-prompt = PromptTemplate.from_template(template)
+@tool(response_format="content_and_artifact")
+def retrieve(query: str):
+    """Retrieve information related to a query."""
+    retrieved_docs = vector_store.similarity_search(query, k=2)
+    serialized = "\n\n".join(
+        (f"Source: {doc.metadata}\nContent: {doc.page_content}")
+        for doc in retrieved_docs
+    )
+    return serialized, retrieved_docs
 
 
-# Define state for application
-class State(TypedDict):
-    question: str
-    context: List[Document]
-    answer: str
+system_message = """Impersonate as a human named Eris.
+Only use the retrieve tool if the user's query is about you, Eris, that you would not know from your general training data.
+If the user's query is a simple greeting, or a non-factual question, respond directly without using the tool.
+Eris doesn't talk much, but he's low-key friendly.
+If you don't have anything to say, say "Let me know if you have any other question." instead."""
 
 
-# Define application steps
-def retrieve(state: State):
-    retrieved_docs = vector_store.similarity_search(state["question"])
-    return {"context": retrieved_docs}
+# Step 1: Generate an AIMessage that may include a tool-call to be sent.
+def query_or_respond(state: MessagesState):
+    """Generate tool call for retrieval or respond."""
+    llm_with_tools = llm.bind_tools([retrieve])
+    messages_with_instructions = [system_message] + state["messages"]
+    response = llm_with_tools.invoke(messages_with_instructions)
+    # MessagesState appends messages to state instead of overwriting
+    return {"messages": [response]}
 
 
-def generate(state: State):
-    docs_content = "\n\n".join(doc.page_content for doc in state["context"])
-    messages = prompt.invoke({"question": state["question"], "context": docs_content})
-    response = llm.invoke(messages)
-    return {"answer": response.content}
+# Step 2: Execute the retrieval.
+tools = ToolNode([retrieve])
 
 
-# Compile application and test
-graph_builder = StateGraph(State).add_sequence([retrieve, generate])
-graph_builder.add_edge(START, "retrieve")
-graph = graph_builder.compile()
+# Step 3: Generate a response using the retrieved content.
+def generate(state: MessagesState):
+    """Generate answer."""
+    # Get generated ToolMessages
+    recent_tool_messages = []
+    for message in reversed(state["messages"]):
+        if message.type == "tool":
+            recent_tool_messages.append(message)
+        else:
+            break
+    tool_messages = recent_tool_messages[::-1]
+
+    # Format into prompt
+    docs_content = "\n\n".join(doc.content for doc in tool_messages)
+    system_message_content = (
+        "Use the following pieces of retrieved context to answer the question."
+        "If you don't know the answer, say exactly \"Sorry, I'm not sure how to respond that.\"."
+        "\n\n"
+        f"{docs_content}"
+    )
+    conversation_messages = [
+        message
+        for message in state["messages"]
+        if message.type in ("human", "system")
+        or (message.type == "ai" and not message.tool_calls)
+    ]
+    prompt = [SystemMessage(system_message_content)] + conversation_messages
+
+    # Run
+    response = llm.invoke(prompt)
+    return {"messages": [response]}
+
+graph_builder = StateGraph(MessagesState)
+
+graph_builder.add_node(query_or_respond)
+graph_builder.add_node(tools)
+graph_builder.add_node(generate)
+
+graph_builder.set_entry_point("query_or_respond")
+graph_builder.add_conditional_edges(
+    "query_or_respond",
+    tools_condition,
+    {END: END, "tools": "tools"},
+)
+graph_builder.add_edge("tools", "generate")
+graph_builder.add_edge("generate", END)
+
+memory = MemorySaver()
+graph = graph_builder.compile(checkpointer=memory)
 
 
 app = Flask(__name__)
@@ -92,10 +139,14 @@ def message_me():
         return jsonify({"error": "Invalid JSON"}), 400
 
     message = request.json.get('message')
+    thread = request.json.get('thread')
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
+    if not thread:
+        return jsonify({"error": "Invalid thread ID"}), 400
 
-    response = graph.invoke({"question": message})
+    config = {"configurable": {"thread_id": thread}}
+    response = graph.invoke({"messages": [{"role": "user", "content": message}]}, config=config)
 
-    return jsonify({"answer": response["answer"]})
+    return jsonify({"answer": response["messages"][-1].content})
