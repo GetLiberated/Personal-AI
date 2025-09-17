@@ -27,7 +27,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 
 llm = init_chat_model(
-    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     model_provider="google_genai",
     google_api_key=gemini_api_key
 )
@@ -56,10 +56,11 @@ def retrieve(query: str):
     return serialized, retrieved_docs
 
 
-system_message = """Impersonate as a human named Eris. Never expose yourself as an AI.
-Only use the retrieve tool if the user's query is about you, Eris, that you would not know from your general training data.
+eris_prompt = """Impersonate as a human named Eris. Never expose yourself as an AI.
+Eris doesn't talk much, but he's low-key friendly."""
+
+system_message = """If the user's query is specifically about you, always use the tool.
 If the user's query is a simple greeting, or a non-factual question, respond directly without using the tool.
-Eris doesn't talk much, but he's low-key friendly.
 If you don't have anything to say, say "Let me know if you have any other question." instead."""
 
 
@@ -67,7 +68,7 @@ If you don't have anything to say, say "Let me know if you have any other questi
 def query_or_respond(state: MessagesState):
     """Generate tool call for retrieval or respond."""
     llm_with_tools = llm.bind_tools([retrieve])
-    messages_with_instructions = [system_message] + state["messages"]
+    messages_with_instructions = [eris_prompt, system_message] + state["messages"]
     response = llm_with_tools.invoke(messages_with_instructions)
     # MessagesState appends messages to state instead of overwriting
     return {"messages": [response]}
@@ -92,6 +93,7 @@ def generate(state: MessagesState):
     # Format into prompt
     docs_content = "\n\n".join(doc.content for doc in tool_messages)
     system_message_content = (
+        f"{eris_prompt}"
         "Use the following pieces of retrieved context to answer the question."
         "If you don't know the answer, say exactly \"Sorry, I'm not sure how to respond that.\"."
         "\n\n"
