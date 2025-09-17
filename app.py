@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
+import logging
 
 gemini_api_key = os.environ.get('GOOGLE_API_KEY')
 pinecone_api_key = os.environ.get('PINECONE_API_KEY')
@@ -135,18 +136,23 @@ def message_me():
     if request.method == 'GET':
         return 'ok'
 
-    if not request.json:
+    json = request.json
+    if not json:
         return jsonify({"error": "Invalid JSON"}), 400
 
-    message = request.json.get('message')
-    thread = request.json.get('thread')
-
+    message = json.get('message')
     if not message:
         return jsonify({"error": "Message is required"}), 400
+
+    thread = json.get('thread')
     if not thread:
         return jsonify({"error": "Invalid thread ID"}), 400
 
-    config = {"configurable": {"thread_id": thread}}
-    response = graph.invoke({"messages": [{"role": "user", "content": message}]}, config=config)
+    try:
+        config = {"configurable": {"thread_id": thread}}
+        response = graph.invoke({"messages": [{"role": "user", "content": message}]}, config=config)
 
-    return jsonify({"answer": response["messages"][-1].content})
+        return jsonify({"answer": response["messages"][-1].content})
+    except Exception as e:
+        logging.error(e)
+        return 'service unavailable', 503
