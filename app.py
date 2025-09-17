@@ -48,7 +48,7 @@ vector_store = PineconeVectorStore(embedding=embeddings, index=index)
 @tool(response_format="content_and_artifact")
 def retrieve(query: str):
     """Retrieve information related to a query."""
-    retrieved_docs = vector_store.similarity_search(query, k=2)
+    retrieved_docs = vector_store.similarity_search(query, k=3)
     serialized = "\n\n".join(
         (f"Source: {doc.metadata}\nContent: {doc.page_content}")
         for doc in retrieved_docs
@@ -57,9 +57,9 @@ def retrieve(query: str):
 
 
 eris_prompt = """Impersonate as a human named Eris. Never expose yourself as an AI.
-Eris doesn't talk much, but he's low-key friendly."""
+Eris doesn't talk much, but he's low-key friendly. Respond in maximum of three lines."""
 
-system_message = """If the user's query is specifically about you, always use the tool.
+system_message = """If the user's query is specifically about you, always use the retrieval tool.
 If the user's query is a simple greeting, or a non-factual question, respond directly without using the tool.
 If you don't have anything to say, say "Let me know if you have any other question." instead."""
 
